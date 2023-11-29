@@ -1,0 +1,415 @@
+---
+title: "A Second RMD File"
+author: "Justin Wininger"
+date: "2023-11-22"
+output: pdf_document
+---
+
+```{r setup, include = FALSE}
+#Load packages with groundhog to improve stability
+knitr::opts_chunk$set(echo = FALSE, dpi=300)
+library(ggplot2)
+library(dplyr)
+library(kableExtra)
+library(rvest)
+library(readr)
+library(tidyr)
+library(googlesheets4)
+library("groundhog")
+# pkgs <- c('ggplot2', 'dplyr', 'kableExtra', 'rvest', 'readr', 'tidyr', 'googlesheets4')
+# groundhog.library(
+#   pkgs, 
+#   "2023-11-22",
+#   tolerate.R.version='4.2.3')
+data("diamonds")
+gs4_deauth
+```
+
+## Collatz Conjecture 
+
+The Collatz Conjecture asks if repeating the same two arithmetic operations will eventually turn every positive integer into one. It can be expressed as a piecewise recursive function f(n). If n is even, divide n by two. If n is odd, multiply n by three and add one. If n is one, stop. Every number, following these operations, will eventually reach 1, but they are very difficult to predict. For example, the stopping time, defined as the number of recursions needed to get to one, for the positive integer 7 is 16, whereas for the positive integer 8, just one number up, it is only 3. Because even neighboring numbers can have wildly different stopping times, the only good way to predict the stopping time for a number is to simply calculate it. Below is a histogram of the stopping times for the first 10,000 positive integers.
+
+```{r Collatz Function}
+#collatz function
+get_collatz <- function(n, counter=0){
+  if (n==1){
+    return(counter)
+  }else if (n%%2==0){
+    counter<<-counter+1
+    get_collatz(n=n/2, counter=counter+1)
+  }else{
+    get_collatz(n=3*n+1, counter=counter+1)
+  }
+}
+```
+
+```{r Collatz Histogram}
+#| fig.cap="Histogram of Stopping Times",
+latex_options = c("HOLD_position")
+#create a vector of all the stopping times
+collatzVector <- Vectorize(
+  FUN=get_collatz, 
+  vectorize.args = "n")
+
+#create a histogram for the stopping times
+ggplot(
+  mapping=aes(collatzVector(n=1:10000))
+)+
+  geom_histogram(
+    bins=30,
+    col=I("black")
+  )+
+  labs(
+    x="Stopping Time",
+    y="Count",
+    title="Stopping Times of the First 10,000 
+Positive Integers Using the Collatz Conjecture"
+  )+
+  theme_bw()
+```
+
+As seen in the histogram, the stopping times are almost impossible to predict. Of the first 10,000 positive integers, over 1,000 have a stopping time of between 44 and 52. Still, 1,000 is only one tenth of all the numbers tested. Because the histogram is complete, and all numbers eventually result in one, it is safe to say that repeating the same two arithmetic operations will transform every positive integer into one, at least for the first 10,000.
+
+## Diamonds
+
+The following data set contains information on roughly 54 thousand individual diamonds. The data set contains the attributes carat, cut, color, clarity, depth, table, price, x, y, and z. This data set might help to illustrate the relationships between various attributes and price. For example, I could observe how price changes when carat increases, and how that relationship differs for each cut. Below is a data visualization that shows just that.
+
+```{r price vs carat by cut visualization}
+#| fig.cap="Visualization of Price vs Carat by Cut",
+latex_options = c("HOLD_position")
+
+#create a data visualization for carat and price by cut
+ggplot(diamonds) +
+  aes(x = carat, y = price) +
+  geom_point() +
+  labs(
+    title = "Price vs Carats of Diamonds by Cut"
+  ) +
+  theme_bw() +
+  facet_wrap(vars(cut))
+```
+
+This data visualization, although imperfect, shows the relationship between carat and price by cut. I do fear, though, that this is an instance of "garbage in, garbage out" with the carats. I believe that whomever classified these diamonds did not weigh them very precisely, and just rounded to the nearest half. This is most obvious when Looking at the "Fair" diamonds. However, regardless of that, it is very clear that as carat increases, so too does price. It is also interesting to note that price seems to increase faster for the better cuts. In other words, the least-squares regression line has a larger slope.
+
+The table below attempts to quantify a similar relationship between cut and price.
+
+```{r price vs cut table}
+#| fig.cap="Summary Table of Price and Cut",
+latex_options = c("HOLD_position")
+
+#create a rudimentary data frame
+diamondTable <- diamonds%>%
+  group_by(cut)%>%
+  select(cut,price)%>%
+  summarise(
+    across(
+      .cols=where(is.numeric),
+      .fns=list(
+        min=~min(price, na.rm=TRUE),
+        Q1=~quantile(price, probs=0.25, na.rm=TRUE),
+        median=~median(price, na.rm=TRUE),
+        Q3=~quantile(price, probs=.75, na.rm=TRUE),
+        max=~max(price, na.rm=TRUE),
+        sam=~mean(price, na.rm=TRUE),
+        sasd=~sd(price, na.rm=TRUE)
+      )
+    ),
+    count=n()
+  )
+
+#change the names 
+names(diamondTable) = gsub(pattern = "price_", replacement = "", x = names(diamondTable))
+
+#polish the tale
+diamondTable%>%
+  kable(
+    caption="Summary Statistics for the Price of Diamonds by cut",
+    booktabs=TRUE,
+    align=c("l", rep("c",6))
+  )%>%
+  kableExtra::kable_styling(
+    bootstrap_options=c("striped", "condensed"),
+    font_size=16
+  )
+
+```
+
+The above table shows summary statistics for the quantitative variable "price" for each cut of diamond. The most surprising part of the table, at least in my opinion, is how the second highest mean price is for the worst cut. Mean might be a bad measure, though, because it is not resistant to outliers. Using the median is even worse, though. The highest median price is for the worst cut. This could all be because there are so few diamonds from the Fair cut, but I don't think it is that simple. The median is supposed to be resistant to outliers, and it is not like a sample size of 1610 is small. Because of this, and the fact that there is seemingly neither a positive nor negative relationship between cut and price as cut increases, I must conclude that the cut of a diamond has very little to do with its price.
+
+Cut might not be a significant factor in determining price, but other things might be. Below is a data visualization that attempts to show other possible relationships.
+
+```{r price vs x by cut and clarity}
+#| fig.cap="Visualization of Price and X by Cut and Clarity",
+latex_options = c("HOLD_position")
+
+#create a data visualization for price and x by cut and clarity
+ggplot(diamonds) +
+  aes(x = x, y = price, colour = clarity) +
+  geom_point() +
+  labs(
+    title="Price vs X of Diamonds by Cut and Clarity"
+  )+
+  scale_color_hue(direction = 1) +
+  theme_bw() +
+  facet_wrap(vars(cut))
+```
+
+The above data visualization shows the relationship between price and x by cut and clarity. Price is the response variable and x is the explanatory variable.This visualization is really 5 in one, with a separate scatterplot for each cut, and within each plot, the different clarities are different colors. I think this visualization does a fantastic job at displaying a clear relationship. Obviously, there is the basic interpretation that as x increases, so does price. That increase is seen in all cuts, and the rate that price increases seems very similar across all cuts. The beauty of this visualization, however, is in the clarities. The individual plots look almost like rainbows, because every clarity is so clear and obvious. There is very little overlap between clarities, and the visualization looks good. It shows that for every cut, price increases faster for the better clarities than it does for the worse clarities. For the best clarity, IF, price increases so much faster than it does for the worst clarity, I1.
+
+## Reflections
+
+In this course so far, I have learned a lot, most of which I have already demonstrated. I learned how to make a recursive function, how to make histograms and other data visualizations using ggplot2, and how to make summary tables. But the most important thing I have learned so far is how to wrangle data. I was able to manually transform the army marital status data into tidy data where every row was a group of soldiers. But, I have also learned how to automate that process, and let the computer do most of the work. I still have to tell the computer what to do, but at least I'm not making the data frame by hand. An example of this can be seen below. 
+```{r group case}
+#scrape the data frame from a google sheet
+armyData <- read_html(
+  x="https://docs.google.com/spreadsheets/d/1uoAaz7_fSNS9F3V6fCpxPJ_t22rJd8DC0NLnIen_O5Q/edit#gid=0"
+)%>%
+  html_elements(css = "table") %>%
+  html_table()
+
+#create the data frames for each sex
+armyDataM <- armyData[[1]]
+
+#remove the unecessary rows and columns 
+armyDataM <- subset(armyDataM, select=-c(1,A,R,S,T,U,V,W,X,Y,Z,AA,E,H,K,N,O,P,Q,D,G,J,M))
+armyDataM <- armyDataM[-c(1:7, 19, 30, 36:100), ]
+armyDataF <- armyData[[1]]
+armyDataF <- subset(armyDataF, select=-c(1,A,R,S,T,U,V,W,X,Y,Z,AA,E,H,K,N,O,P,Q,C,F,I,L))
+armyDataF <- armyDataF[-c(1:7, 19, 30, 36:100), ]
+
+#rename columns
+armyDataM <- armyDataM%>%rename(
+  `Pay Grade`=B, `Single Without Children`=C, `Single With Children`=F, 
+  `Joint Service Marriage`=I, `Civilian Marriage`=L)
+armyDataF <- armyDataF%>%rename(
+  `Pay Grade`=B, `Single Without Children`=D, `Single With Children`=G, 
+  `Joint Service Marriage`=J, `Civilian Marriage`=M)
+
+#remove unnecessary rows again
+armyDataM <- armyDataM[-c(1,2), ]
+armyDataF <- armyDataF[-c(1,2), ]
+
+#pivot the two data frames longer
+armyDataM <- armyDataM %>%
+  pivot_longer(!`Pay Grade`, names_to = "Marital Status", values_to="Count")
+armyDataM <- armyDataM%>%
+  mutate(Sex= "Male")
+armyDataF <- armyDataF %>%
+  pivot_longer(!`Pay Grade`, names_to = "Marital Status", values_to="Count")
+armyDataF <- armyDataF%>%
+  mutate(Sex= "Female")
+
+#combine the two data frames, remove commas, and rearrange the commas.
+armyDataGroupCase <- rbind(armyDataM, armyDataF)
+armyDataGroupCase$Count <- as.numeric(gsub(",","",armyDataGroupCase$Count))
+armyDataGroupCase <- armyDataGroupCase[,c("Pay Grade","Marital Status","Sex","Count")]
+
+#show first and last few rows
+head(armyDataGroupCase)
+tail(armyDataGroupCase)
+```
+The above code chunk creates a data frame such that each row is all the soldiers who have the same attributes within the army. For example, the first row shows all 9,456 male E-1s in the army who are single without children.
+
+Similarly, I was also able to create a data frame where every row was an individual soldier. 
+```{r soldier case}
+#create a data frame where one row is one soldier
+armyDataSoldierCase <- uncount(armyDataGroupCase, Count)
+
+#show first and last few rows
+head(armyDataSoldierCase)
+tail(armyDataSoldierCase)
+```
+Unfortunately, both data frames are too large to show in their entirety, but fortunately, another thing I learned is how to use head and tail to show a glimpse of a data frame. 
+
+In all, I have learned a lot in this class, but I believe my data wrangling skills to be the most important. Calling my abilities "skills" is perhaps a little disingenuous, as I am nowhere near skilled. But, learning comes with time, and I hope that by the end of my career at The Pennsylvania State University, I will be quite proficient with R.
+
+```{r fileDirectory picture}
+#add picture of file directory
+setwd("~/Downloads/R materials/Activity 10")
+knitr::include_graphics("Screenshot 2023-11-26 at 9.31.43 PM.png")
+```
+
+\newpage
+# Code Appendix
+``` {r codeAppedix}
+#| ref.label = knitr::all_labels(),
+#| echo = TRUE,
+#| eval = FALSE
+
+#Load packages with groundhog to improve stability
+knitr::opts_chunk$set(echo = FALSE, dpi=300)
+library(ggplot2)
+library(dplyr)
+library(kableExtra)
+library(rvest)
+library(readr)
+library(tidyr)
+library(googlesheets4)
+library("groundhog")
+# pkgs <- c('ggplot2', 'dplyr', 'kableExtra', 'rvest', 'readr', 'tidyr', 'googlesheets4')
+# groundhog.library(
+#   pkgs, 
+#   "2023-11-22",
+#   tolerate.R.version='4.2.3')
+data("diamonds")
+gs4_deauth
+
+#collatz function
+get_collatz <- function(n, counter=0){
+  if (n==1){
+    return(counter)
+  }else if (n%%2==0){
+    counter<<-counter+1
+    get_collatz(n=n/2, counter=counter+1)
+  }else{
+    get_collatz(n=3*n+1, counter=counter+1)
+  }
+}
+
+#| fig.cap="Histogram of Stopping Times",
+latex_options = c("HOLD_position")
+#create a vector of all the stopping times
+collatzVector <- Vectorize(
+  FUN=get_collatz, 
+  vectorize.args = "n")
+
+#create a histogram for the stopping times
+ggplot(
+  mapping=aes(collatzVector(n=1:10000))
+)+
+  geom_histogram(
+    bins=30,
+    col=I("black")
+  )+
+  labs(
+    x="Stopping Time",
+    y="Count",
+    title="Stopping Times of the First 10,000 
+Positive Integers Using the Collatz Conjecture"
+  )+
+  theme_bw()
+
+#| fig.cap="Visualization of Price vs Carat by Cut",
+latex_options = c("HOLD_position")
+
+#create a data visualization for carat and price by cut
+ggplot(diamonds) +
+  aes(x = carat, y = price) +
+  geom_point() +
+  labs(
+    title = "Price vs Carats of Diamonds by Cut"
+  ) +
+  theme_bw() +
+  facet_wrap(vars(cut))
+
+#| fig.cap="Summary Table of Price and Cut",
+latex_options = c("HOLD_position")
+
+#create a rudimentary data frame
+diamondTable <- diamonds%>%
+  group_by(cut)%>%
+  select(cut,price)%>%
+  summarise(
+    across(
+      .cols=where(is.numeric),
+      .fns=list(
+        min=~min(price, na.rm=TRUE),
+        Q1=~quantile(price, probs=0.25, na.rm=TRUE),
+        median=~median(price, na.rm=TRUE),
+        Q3=~quantile(price, probs=.75, na.rm=TRUE),
+        max=~max(price, na.rm=TRUE),
+        sam=~mean(price, na.rm=TRUE),
+        sasd=~sd(price, na.rm=TRUE)
+      )
+    ),
+    count=n()
+  )
+
+#change the names 
+names(diamondTable) = gsub(pattern = "price_", replacement = "", x = names(diamondTable))
+
+#polish the tale
+diamondTable%>%
+  kable(
+    caption="Summary Statistics for the Price of Diamonds by cut",
+    booktabs=TRUE,
+    align=c("l", rep("c",6))
+  )%>%
+  kableExtra::kable_styling(
+    bootstrap_options=c("striped", "condensed"),
+    font_size=16
+  )
+
+#| fig.cap="Visualization of Price and X by Cut and Clarity",
+latex_options = c("HOLD_position")
+
+#create a data visualization for price and x by cut and clarity
+ggplot(diamonds) +
+  aes(x = x, y = price, colour = clarity) +
+  geom_point() +
+  labs(
+    title="Price vs X of Diamonds by Cut and Clarity"
+  )+
+  scale_color_hue(direction = 1) +
+  theme_bw() +
+  facet_wrap(vars(cut))
+
+#scrape the data frame from a google sheet
+armyData <- read_html(
+  x="https://docs.google.com/spreadsheets/d/1uoAaz7_fSNS9F3V6fCpxPJ_t22rJd8DC0NLnIen_O5Q/edit#gid=0"
+)%>%
+  html_elements(css = "table") %>%
+  html_table()
+
+#create the data frames for each sex
+armyDataM <- armyData[[1]]
+
+#remove the unecessary rows and columns 
+armyDataM <- subset(armyDataM, select=-c(1,A,R,S,T,U,V,W,X,Y,Z,AA,E,H,K,N,O,P,Q,D,G,J,M))
+armyDataM <- armyDataM[-c(1:7, 19, 30, 36:100), ]
+armyDataF <- armyData[[1]]
+armyDataF <- subset(armyDataF, select=-c(1,A,R,S,T,U,V,W,X,Y,Z,AA,E,H,K,N,O,P,Q,C,F,I,L))
+armyDataF <- armyDataF[-c(1:7, 19, 30, 36:100), ]
+
+#rename columns
+armyDataM <- armyDataM%>%rename(
+  `Pay Grade`=B, `Single Without Children`=C, `Single With Children`=F, 
+  `Joint Service Marriage`=I, `Civilian Marriage`=L)
+armyDataF <- armyDataF%>%rename(
+  `Pay Grade`=B, `Single Without Children`=D, `Single With Children`=G, 
+  `Joint Service Marriage`=J, `Civilian Marriage`=M)
+
+#remove unnecessary rows again
+armyDataM <- armyDataM[-c(1,2), ]
+armyDataF <- armyDataF[-c(1,2), ]
+
+#pivot the two data frames longer
+armyDataM <- armyDataM %>%
+  pivot_longer(!`Pay Grade`, names_to = "Marital Status", values_to="Count")
+armyDataM <- armyDataM%>%
+  mutate(Sex= "Male")
+armyDataF <- armyDataF %>%
+  pivot_longer(!`Pay Grade`, names_to = "Marital Status", values_to="Count")
+armyDataF <- armyDataF%>%
+  mutate(Sex= "Female")
+
+#combine the two data frames, remove commas, and rearrange the commas.
+armyDataGroupCase <- rbind(armyDataM, armyDataF)
+armyDataGroupCase$Count <- as.numeric(gsub(",","",armyDataGroupCase$Count))
+armyDataGroupCase <- armyDataGroupCase[,c("Pay Grade","Marital Status","Sex","Count")]
+
+#show first and last few rows
+head(armyDataGroupCase)
+tail(armyDataGroupCase)
+
+#create a data frame where one row is one soldier
+armyDataSoldierCase <- uncount(armyDataGroupCase, Count)
+
+#show first and last few rows
+head(armyDataSoldierCase)
+tail(armyDataSoldierCase)
+
+#add picture of file directory
+setwd("~/Downloads/R materials/Activity 10")
+knitr::include_graphics("Screenshot 2023-11-26 at 9.31.43 PM.png")
+```
